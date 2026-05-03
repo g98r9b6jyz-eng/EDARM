@@ -17,6 +17,7 @@
         .excel-table th { background-color: #f8fafc; padding: 8px 12px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; text-align: center; color: #475569; border-bottom: 2px solid #cbd5e1; white-space: nowrap; }
         .excel-table td input { width: 100%; height: 100%; min-height: 34px; padding: 6px; border: none; outline: none; font-size: 0.875rem; text-align: center; text-transform: uppercase; color: #0f172a; background: transparent; transition: background-color 0.15s; font-weight: 500;}
         .excel-table td input:focus { box-shadow: inset 0 0 0 2px #2563eb; background-color: #eff6ff; z-index: 10; position: relative; }
+        .excel-table td input.selected-cell { background-color: #e0f2fe; box-shadow: inset 0 0 0 2px #0ea5e9; z-index: 5; }
         .excel-table td input:hover:not(:focus) { background-color: #f1f5f9; }
         .row-header { background-color: #f8fafc; font-weight: 600; text-align: left !important; font-size: 0.75rem; color: #475569; width: 140px; padding: 0 !important; }
         
@@ -191,6 +192,20 @@
         const outputDays = ["Sunday 1", "Monday 2", "Tuesday 3", "Wednesday 4", "Thursday 5", "Friday 6", "Saturday 7", "Sunday 8", "Monday 9", "Tuesday 10", "Wednesday 11", "Thursday 12", "Friday 13", "Saturday 14", "Sunday 15"];
         
         let pendingCellForModal = null; // Keeps track of where the user was typing
+        let isModalOpen = false;
+        let anchorCell = null; // Tracks the start coordinate for Shift-selection
+        let currentSelectedCells = [];
+        let undoStack = []; // Array to track bulk actions for Undo
+
+        // Global Undo Listener
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                if (!isModalOpen) {
+                    e.preventDefault();
+                    handleUndo();
+                }
+            }
+        });
 
         // --- 2. BUILD UI ---
         function initGrid() {
@@ -249,8 +264,11 @@
                 const input = document.createElement('input');
                 input.type = 'text';
                 
+                input.addEventListener('focus', handleFocus);
                 input.addEventListener('blur', handleCellBlur);
                 input.addEventListener('keydown', handleKeyDown);
+                input.addEventListener('mousedown', handleMouseDown);
+                input.addEventListener('paste', handlePaste);
                 
                 td.appendChild(input);
                 tr.appendChild(td);
@@ -265,6 +283,128 @@
         }
 
         // --- 3. LOGIC & NAVIGATION ---
+        function handleFocus(e) {
+            // Save the value before editing begins for undo history
+            e.target.dataset.oldValue = e.target.value;
+        }
+
+        function pushToUndoStack(changes) {
+            if (changes && changes.length > 0) {
+                undoStack.push(changes);
+                if (undoStack.length > 100) undoStack.shift(); // Keep last 100 actions memory efficient
+            }
+        }
+
+        function handleUndo() {
+            if (undoStack.length === 0) return;
+            const lastAction = undoStack.pop();
+            
+            lastAction.forEach(change => {
+                change.cell.value = change.oldVal;
+                validateCell(change.cell, true); // true skips modal popups on undo
+                change.cell.dataset.oldValue = change.cell.value;
+            });
+        }
+
+        function getCoords(input) {
+            const td = input.parentElement;
+            const tr = td.parentElement;
+            const c = Array.from(tr.children).indexOf(td) - 1;
+            const r = Array.from(tr.parentElement.children).indexOf(tr);
+            return {r, c};
+        }
+
+        function getCell(r, c) {
+            const tbody = document.getElementById('input-body');
+            const tr = tbody.children[r];
+            if (tr) {
+                const td = tr.children[c + 1];
+                if (td) return td.querySelector('input');
+            }
+            return null;
+        }
+
+        function selectRange(startCoords, endCoords) {
+            currentSelectedCells.forEach(input => input.classList.remove('selected-cell'));
+            currentSelectedCells = [];
+            
+            if (!startCoords || !endCoords) return;
+
+            const minR = Math.min(startCoords.r, endCoords.r);
+            const maxR = Math.max(startCoords.r, endCoords.r);
+            const minC = Math.min(startCoords.c, endCoords.c);
+            const maxC = Math.max(startCoords.c, endCoords.c);
+
+            for (let r = minR; r <= maxR; r++) {
+                for (let c = minC; c <= maxC; c++) {
+                    const cell = getCell(r, c);
+                    if (cell) {
+                        cell.classList.add('selected-cell');
+                        currentSelectedCells.push(cell);
+                    }
+                }
+            }
+        }
+
+        function handleMouseDown(e) {
+            const coords = getCoords(this);
+            if (e.shiftKey && anchorCell) {
+                e.preventDefault();
+                selectRange(anchorCell, coords);
+                this.focus();
+            } else {
+                anchorCell = coords;
+                selectRange(coords, coords);
+            }
+        }
+
+        function handlePaste(e) {
+            e.preventDefault();
+            const pastedText = (e.clipboardData || window.clipboardData).getData('text');
+            
+            let changes = [];
+            
+            if (currentSelectedCells.length > 0 && currentSelectedCells.includes(this)) {
+                currentSelectedCells.forEach(cell => {
+                    if (cell.value !== pastedText) {
+                        changes.push({ cell: cell, oldVal: cell.value });
+                        cell.value = pastedText;
+                        validateCell(cell);
+                        cell.dataset.oldValue = cell.value;
+                    }
+                });
+            } else {
+                if (this.value !== pastedText) {
+                    changes.push({ cell: this, oldVal: this.value });
+                    this.value = pastedText;
+                    validateCell(this);
+                    this.dataset.oldValue = this.value;
+                }
+            }
+            
+            pushToUndoStack(changes);
+        }
+
+        function validateCell(inputElement, skipModal = false) {
+            const cleanedValues = inputElement.value.split(',').map(v => v.replace(/[\s\r\n]+/g, '').toUpperCase()).filter(v => v !== "");
+            
+            if (cleanedValues.length > 0) {
+                inputElement.value = cleanedValues.join(', ');
+            } else {
+                inputElement.value = '';
+            }
+            
+            if (isModalOpen || skipModal) return;
+
+            for (let val of cleanedValues) {
+                const found = providers.find(p => p.initials.toUpperCase() === val);
+                if (!found) {
+                    openModal(val, inputElement);
+                    break;
+                }
+            }
+        }
+
         function handleKeyDown(e) {
             // Allows moving around the grid with Arrow Keys dynamically
             const currentInput = e.target;
@@ -275,63 +415,82 @@
             const rIndex = Array.from(tr.parentElement.children).indexOf(tr);
             
             let nextR = rIndex, nextC = cIndex;
+            let isMoving = false;
             
             if (e.key === 'Tab') {
                 e.preventDefault(); // Prevent default browser tab behavior (moving right)
+                isMoving = true;
                 if (e.shiftKey) {
                     nextR--; // Shift + Tab moves UP
                 } else {
                     nextR++; // Tab moves DOWN
                 }
             } else if(e.key === 'ArrowRight') {
-                nextC++;
+                nextC++; isMoving = true;
             } else if(e.key === 'ArrowLeft') {
-                nextC--;
+                nextC--; isMoving = true;
             } else if(e.key === 'ArrowDown') {
-                nextR++;
+                nextR++; isMoving = true;
             } else if(e.key === 'ArrowUp') {
-                nextR--;
+                nextR--; isMoving = true;
+            } else if (e.key === 'Backspace' || e.key === 'Delete') {
+                if (currentSelectedCells.length > 1) {
+                    e.preventDefault();
+                    let changes = [];
+                    currentSelectedCells.forEach(cell => {
+                        if (cell.value !== '') {
+                            changes.push({ cell: cell, oldVal: cell.value });
+                            cell.value = '';
+                            validateCell(cell);
+                            cell.dataset.oldValue = cell.value;
+                        }
+                    });
+                    pushToUndoStack(changes);
+                }
+                return;
             } else {
                 return;
             }
 
-            const tbody = tr.parentElement;
-            const targetTr = tbody.children[nextR];
-            if(targetTr) {
-                const targetTd = targetTr.children[nextC + 1]; // +1 for row header
-                if(targetTd) {
-                    const targetInput = targetTd.querySelector('input');
-                    if(targetInput) {
-                        e.preventDefault();
-                        targetInput.focus();
+            if(isMoving) {
+                const tbody = tr.parentElement;
+                const targetTr = tbody.children[nextR];
+                if(targetTr) {
+                    const targetTd = targetTr.children[nextC + 1]; // +1 for row header
+                    if(targetTd) {
+                        const targetInput = targetTd.querySelector('input');
+                        if(targetInput) {
+                            e.preventDefault();
+                            targetInput.focus();
+                            
+                            if (e.shiftKey && e.key.startsWith('Arrow')) {
+                                selectRange(anchorCell, getCoords(targetInput));
+                            } else {
+                                anchorCell = getCoords(targetInput);
+                                selectRange(anchorCell, anchorCell);
+                            }
+                        }
                     }
                 }
             }
         }
 
         function handleCellBlur(e) {
-            // If there's a comma (multiple providers), test each one.
-            // Replace completely removes all spaces, tabs, and enters to ensure strict matching
-            const cleanedValues = e.target.value.split(',').map(v => v.replace(/[\s\r\n]+/g, '').toUpperCase()).filter(v => v !== "");
+            const cell = e.target;
+            const oldVal = cell.dataset.oldValue || '';
             
-            // Visually clean up the input box to remove accidental spaces or enters
-            if (cleanedValues.length > 0) {
-                e.target.value = cleanedValues.join(', ');
-            } else {
-                e.target.value = '';
-            }
+            validateCell(cell);
             
-            for (let val of cleanedValues) {
-                const found = providers.find(p => p.initials.toUpperCase() === val);
-                if (!found) {
-                    openModal(val, e.target);
-                    break; // Only prompt one at a time to avoid modal stacking
-                }
+            // Check if the value actually changed during this edit sequence
+            if (cell.value !== oldVal) {
+                pushToUndoStack([{ cell: cell, oldVal: oldVal }]);
+                cell.dataset.oldValue = cell.value;
             }
         }
 
         // --- 4. MODAL MANAGEMENT ---
         function openModal(initials, sourceInput) {
+            isModalOpen = true;
             pendingCellForModal = sourceInput;
             document.getElementById('modal-initials').innerText = initials;
             document.getElementById('modal-name').value = ''; // clear previous
@@ -362,6 +521,7 @@
                 }
             }
 
+            isModalOpen = false;
             const modal = document.getElementById('new-provider-modal');
             modal.classList.add('hidden');
             modal.classList.remove('flex');
