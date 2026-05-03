@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A.R.M. Automated Re-scheduling Module</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS for Excel Export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    
+    <style>
+        /* Custom styles to make the table feel more like Excel but professional */
+        .excel-table { border-collapse: separate; border-spacing: 0; width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
+        .excel-table th, .excel-table td { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 0; position: relative; }
+        .excel-table th { background-color: #f8fafc; padding: 8px 12px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; text-align: center; color: #475569; border-bottom: 2px solid #cbd5e1; }
+        .excel-table td input { width: 100%; height: 100%; min-height: 34px; padding: 6px; border: none; outline: none; font-size: 0.875rem; text-align: center; text-transform: uppercase; color: #0f172a; background: transparent; transition: background-color 0.15s; font-weight: 500;}
+        .excel-table td input:focus { box-shadow: inset 0 0 0 2px #2563eb; background-color: #eff6ff; z-index: 10; position: relative; }
+        .excel-table td input:hover:not(:focus) { background-color: #f1f5f9; }
+        .row-header { background-color: #f8fafc; font-weight: 600; text-align: left !important; font-size: 0.75rem; color: #475569; width: 130px; padding: 0 !important; }
+        
+        /* Output table styles */
+        .output-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 0.875rem; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden; }
+        .output-table th, .output-table td { border-right: 1px solid #e2e8f0; border-bottom: 1px solid #e2e8f0; padding: 8px 12px; text-align: center; color: #334155; }
+        .output-table th { background-color: #1e3a8a; color: white; font-weight: 600; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.05em; border-right: 1px solid #3b82f6;} 
+        .output-table td.text-left { text-align: left; color: #0f172a;}
+        .output-table tr:nth-child(even) td { background-color: #f8fafc; }
+        .output-table tr:hover td { background-color: #f1f5f9; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8 font-sans text-slate-800">
+
+    <div class="max-w-[1600px] mx-auto bg-white shadow-xl shadow-slate-200/50 rounded-xl overflow-hidden border border-slate-200">
+        
+        <!-- Header -->
+        <div class="bg-slate-900 text-white p-5 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-bold tracking-wide flex items-baseline gap-2">
+                    A.R.M.
+                    <span class="text-xs text-slate-400 uppercase tracking-widest font-semibold mt-1">Automated Re-scheduling Module</span>
+                </h1>
+            </div>
+            <div class="flex p-1 bg-slate-800/80 rounded-lg border border-slate-700/50">
+                <button onclick="switchTab('input')" id="tab-btn-input" class="px-5 py-2 bg-blue-600 text-white rounded-md text-sm font-semibold shadow-sm transition-all duration-200">1. Input Schedule</button>
+                <button onclick="switchTab('output'); generateOutput();" id="tab-btn-output" class="px-5 py-2 text-slate-300 hover:text-white hover:bg-slate-700 rounded-md text-sm font-semibold transition-all duration-200">2. View & Export</button>
+            </div>
+        </div>
+
+        <!-- Tab 1: Input Grid -->
+        <div id="tab-input" class="p-6 overflow-x-auto">
+            <p class="text-slate-500 mb-5 text-sm flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Type initials into the grid. Use Arrow Keys or Tab/Shift+Tab to navigate. Unknown initials will automatically prompt for new provider details.
+            </p>
+            <div class="rounded-lg border border-slate-200 shadow-sm overflow-hidden">
+                <table class="excel-table" id="input-grid">
+                    <thead>
+                        <tr id="input-headers">
+                            <th>Shift</th>
+                            <!-- Days populated via JS -->
+                        </tr>
+                    </thead>
+                    <tbody id="input-body">
+                        <!-- Rows populated via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Tab 2: Output Grid -->
+        <div id="tab-output" class="p-6 overflow-x-auto hidden">
+            <div class="flex flex-col md:flex-row justify-between items-center mb-5 gap-4">
+                <p class="text-slate-500 text-sm flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+                    Review the organized schedule below. Empty rows remain for providers with no shifts.
+                </p>
+                <button onclick="exportToExcel()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2.5 rounded-lg shadow-sm font-bold flex items-center transition-all duration-200 focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    Export to Excel
+                </button>
+            </div>
+            
+            <div class="shadow-sm rounded-lg overflow-x-auto">
+                <table class="output-table" id="final-output-table">
+                    <thead>
+                        <tr id="output-headers">
+                            <th class="w-56 text-left pl-4">Provider</th>
+                            <th>Initials</th>
+                            <th>Role</th>
+                            <!-- Output Days populated via JS -->
+                        </tr>
+                    </thead>
+                    <tbody id="output-body">
+                        <!-- Output Rows populated via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for New Provider -->
+    <div id="new-provider-modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm hidden items-center justify-center z-50 transition-opacity">
+        <div class="bg-white rounded-xl p-6 w-[400px] shadow-2xl border border-slate-200">
+            <div class="flex items-center gap-3 border-b border-slate-100 pb-3 mb-4">
+                <div class="bg-amber-100 text-amber-600 p-2 rounded-full">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                </div>
+                <h2 class="text-lg font-bold text-slate-800">New Initials Detected</h2>
+            </div>
+            <p class="text-sm text-slate-600 mb-5">The initials <strong id="modal-initials" class="text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded font-mono border border-slate-200"></strong> were not found in the directory. Please add their information.</p>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">Name (Last, first initial)</label>
+                <input type="text" id="modal-name" placeholder="e.g. SMITH, J" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:blue-500 focus:border-blue-500 outline-none uppercase transition-shadow text-sm">
+            </div>
+            
+            <div class="mb-6">
+                <label class="block text-sm font-semibold text-slate-700 mb-1.5">Role</label>
+                <select id="modal-role" class="w-full border border-slate-300 rounded-lg px-3 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow text-sm bg-white">
+                    <option value="MD">MD</option>
+                    <option value="APP">APP</option>
+                </select>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+                <button onclick="closeModal(false)" class="px-4 py-2 border border-slate-300 rounded-lg text-slate-700 hover:bg-slate-50 transition-colors font-medium text-sm">Cancel</button>
+                <button onclick="closeModal(true)" class="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm transition-colors font-bold text-sm">Save Provider</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. DATA INITIALIZATION ---
+        // Extracted directly from Image 2
+        let providers = [
+            { name: "ADAM, G", initials: "GA", role: "MD" },
+            { name: "ARCEDO, V", initials: "VCA", role: "MD" },
+            { name: "BACASNOT, J", initials: "JVB", role: "MD" },
+            { name: "BASTERRECHEA, H", initials: "HRB", role: "MD" },
+            { name: "BOU, C", initials: "CB", role: "MD" },
+            { name: "CABATU, A", initials: "ACC", role: "MD" },
+            { name: "DE LEON, M", initials: "MDT", role: "MD" },
+            { name: "DOMINGUEZ, G", initials: "GJDP", role: "MD" },
+            { name: "DOTSON, T", initials: "TMD", role: "MD" },
+            { name: "GONZALEZ-TORRES, J", initials: "JGT", role: "MD" },
+            { name: "GRAZIANO, J", initials: "JDG", role: "MD" },
+            { name: "JOHNSON, C", initials: "CJ", role: "MD" },
+            { name: "MOHAR, C", initials: "CMM", role: "MD" },
+            { name: "PAULIS, J", initials: "JP", role: "MD" },
+            { name: "PEREZ, K", initials: "KFP", role: "MD" },
+            { name: "POOLE, R", initials: "RP", role: "MD" },
+            { name: "RUIZ-QUINONES, J", initials: "JIR", role: "MD" },
+            { name: "SANDERS, B", initials: "BS", role: "MD" },
+            { name: "SORGE, R", initials: "RMS", role: "MD" },
+            { name: "SOSA, E", initials: "ES", role: "MD" },
+            { name: "VIJAPURA, C", initials: "CAV", role: "MD" },
+            { name: "ALEXANDER, B", initials: "BRA", role: "APP" },
+            { name: "BENJAMIN, J", initials: "JPB", role: "APP" },
+            { name: "BRINSON, T", initials: "WTB", role: "APP" },
+            { name: "CALIFANO, J", initials: "JNC", role: "APP" },
+            { name: "DECHON, B", initials: "RLD", role: "APP" },
+            { name: "FREDERIQUE-BELL, P", initials: "PFB", role: "APP" },
+            { name: "GRIMALDI, T", initials: "TAG", role: "APP" },
+            { name: "PIERSON, K", initials: "KRP", role: "APP" }
+        ];
+
+        // Extracted directly from Image 1
+        const shifts = [
+            "5a-3p", "5a-5p", "6a-4p", "7a-5p", "7a-7p", "8a-6p", "9a-7p", 
+            "10a-8p", "12p-10p", "12p-10p", "2p-12a", "4p-2a", "6p-4a", 
+            "6p-6a", "8p-6a", "8p-8a", "10a-8p"
+        ];
+
+        const inputDays = ["Sunday 1", "Monday 2", "Tuesday 3", "Wednesday 4", "Thursday 5", "Friday 6", "Saturday 7", "Sunday 8", "Monday 9", "Tuesday 10", "Wednesday 11", "Thursday 12", "Friday 13", "Saturday 14", "Sunday 15"];
+        const outputDays = ["Sunday 1", "Monday 2", "Tuesday 3", "Wednesday 4", "Thursday 5", "Friday 6", "Saturday 7", "Sunday 8", "Monday 9", "Tuesday 10", "Wednesday 11", "Thursday 12", "Friday 13", "Saturday 14", "Sunday 15"];
+        
+        let pendingCellForModal = null; // Keeps track of where the user was typing
+
+        // --- 2. BUILD UI ---
+        function initGrid() {
+            // Build Input Headers
+            const inputHeaderRow = document.getElementById('input-headers');
+            inputDays.forEach(day => {
+                const th = document.createElement('th');
+                th.innerText = day;
+                inputHeaderRow.appendChild(th);
+            });
+
+            // Build Input Body
+            shifts.forEach(shift => {
+                addRow(shift);
+            });
+
+            // Build Output Headers
+            const outputHeaderRow = document.getElementById('output-headers');
+            outputDays.forEach(day => {
+                const th = document.createElement('th');
+                th.innerText = day;
+                outputHeaderRow.appendChild(th);
+            });
+        }
+
+        function addRow(shiftName, referenceTr = null) {
+            const inputBody = document.getElementById('input-body');
+            const tr = document.createElement('tr');
+            
+            const th = document.createElement('td');
+            th.className = 'row-header';
+            
+            const flexContainer = document.createElement('div');
+            flexContainer.className = 'flex justify-between items-center px-3 py-1.5 h-full';
+            
+            const shiftSpan = document.createElement('span');
+            shiftSpan.innerText = shiftName;
+            
+            const addBtn = document.createElement('button');
+            addBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
+            addBtn.title = 'Duplicate Shift Row';
+            addBtn.className = 'text-slate-400 hover:text-blue-600 hover:bg-blue-100 rounded p-1 transition-all flex-shrink-0 ml-1 opacity-60 hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-blue-400';
+            addBtn.onclick = function() { addRow(shiftName, tr); };
+            
+            flexContainer.appendChild(shiftSpan);
+            flexContainer.appendChild(addBtn);
+            th.appendChild(flexContainer);
+            tr.appendChild(th);
+
+            inputDays.forEach((day, cIndex) => {
+                const td = document.createElement('td');
+                const input = document.createElement('input');
+                input.type = 'text';
+                
+                input.addEventListener('blur', handleCellBlur);
+                input.addEventListener('keydown', handleKeyDown);
+                
+                td.appendChild(input);
+                tr.appendChild(td);
+            });
+
+            // Insert after the clicked row, or at the end if none clicked
+            if (referenceTr && referenceTr.nextSibling) {
+                inputBody.insertBefore(tr, referenceTr.nextSibling);
+            } else {
+                inputBody.appendChild(tr);
+            }
+        }
+
+        // --- 3. LOGIC & NAVIGATION ---
+        function handleKeyDown(e) {
+            // Allows moving around the grid with Arrow Keys dynamically
+            const currentInput = e.target;
+            const td = currentInput.parentElement;
+            const tr = td.parentElement;
+            
+            const cIndex = Array.from(tr.children).indexOf(td) - 1; // -1 for row header
+            const rIndex = Array.from(tr.parentElement.children).indexOf(tr);
+            
+            let nextR = rIndex, nextC = cIndex;
+            
+            if (e.key === 'Tab') {
+                e.preventDefault(); // Prevent default browser tab behavior (moving right)
+                if (e.shiftKey) {
+                    nextR--; // Shift + Tab moves UP
+                } else {
+                    nextR++; // Tab moves DOWN
+                }
+            } else if(e.key === 'ArrowRight') {
+                nextC++;
+            } else if(e.key === 'ArrowLeft') {
+                nextC--;
+            } else if(e.key === 'ArrowDown') {
+                nextR++;
+            } else if(e.key === 'ArrowUp') {
+                nextR--;
+            } else {
+                return;
+            }
+
+            const tbody = tr.parentElement;
+            const targetTr = tbody.children[nextR];
+            if(targetTr) {
+                const targetTd = targetTr.children[nextC + 1]; // +1 for row header
+                if(targetTd) {
+                    const targetInput = targetTd.querySelector('input');
+                    if(targetInput) {
+                        e.preventDefault();
+                        targetInput.focus();
+                    }
+                }
+            }
+        }
+
+        function handleCellBlur(e) {
+            // If there's a comma (multiple providers), test each one.
+            const values = e.target.value.split(',').map(v => v.trim().toUpperCase()).filter(v => v !== "");
+            
+            for (let val of values) {
+                const found = providers.find(p => p.initials.toUpperCase() === val);
+                if (!found) {
+                    openModal(val, e.target);
+                    break; // Only prompt one at a time to avoid modal stacking
+                }
+            }
+        }
+
+        // --- 4. MODAL MANAGEMENT ---
+        function openModal(initials, sourceInput) {
+            pendingCellForModal = sourceInput;
+            document.getElementById('modal-initials').innerText = initials;
+            document.getElementById('modal-name').value = ''; // clear previous
+            document.getElementById('modal-role').value = 'MD'; // default
+            
+            const modal = document.getElementById('new-provider-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            document.getElementById('modal-name').focus();
+        }
+
+        function closeModal(save) {
+            if (save) {
+                const name = document.getElementById('modal-name').value.trim().toUpperCase();
+                const role = document.getElementById('modal-role').value;
+                const initials = document.getElementById('modal-initials').innerText;
+
+                if (name === "") {
+                    alert("Please enter a name.");
+                    return;
+                }
+
+                providers.push({ name, initials, role });
+            } else {
+                // If they cancel, optionally clear the cell so it doesn't break output mapping
+                if(pendingCellForModal) {
+                    // pendingCellForModal.value = ''; 
+                }
+            }
+
+            const modal = document.getElementById('new-provider-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            
+            // Return focus to grid
+            if(pendingCellForModal) pendingCellForModal.focus();
+            pendingCellForModal = null;
+        }
+
+        // --- 5. DATA TRANSFORMATION & OUTPUT ---
+        function generateOutput() {
+            // 1. Map all data into a temporary object
+            let scheduleMap = {};
+            
+            // Initialize map with all known providers to ensure blank rows exist
+            providers.forEach(p => {
+                scheduleMap[p.initials.toUpperCase()] = Array(outputDays.length).fill("");
+            });
+
+            // 2. Read the input grid dynamically
+            const inputBody = document.getElementById('input-body');
+            const rows = inputBody.querySelectorAll('tr');
+            
+            rows.forEach((tr) => {
+                const shiftName = tr.querySelector('.row-header span').innerText;
+                const inputs = tr.querySelectorAll('input');
+                
+                inputs.forEach((input, cIndex) => {
+                    if(input.value.trim() !== "") {
+                        // Handle multiple initials separated by commas
+                        const entries = input.value.split(',').map(v => v.trim().toUpperCase());
+                        
+                        entries.forEach(initial => {
+                            if(scheduleMap[initial] !== undefined) {
+                                // If they already have a shift this day, append it (e.g. split shift)
+                                if (scheduleMap[initial][cIndex] !== "") {
+                                    scheduleMap[initial][cIndex] += ", " + shiftName;
+                                } else {
+                                    scheduleMap[initial][cIndex] = shiftName;
+                                }
+                            }
+                        });
+                    }
+                });
+            });
+
+            // 3. Sort Providers (MD first, then APP, then Alphabetical by Name)
+            let sortedProviders = [...providers].sort((a, b) => {
+                if (a.role !== b.role) return a.role === "MD" ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            });
+
+            // 4. Render the Output Table
+            const outputBody = document.getElementById('output-body');
+            outputBody.innerHTML = ''; // Clear previous
+
+            sortedProviders.forEach(p => {
+                const tr = document.createElement('tr');
+                
+                // Provider Info Columns
+                tr.innerHTML = `
+                    <td class="text-left font-semibold">${p.name}</td>
+                    <td class="font-medium">${p.initials}</td>
+                    <td class="text-gray-600">${p.role}</td>
+                `;
+
+                // Days Columns
+                const mappedShifts = scheduleMap[p.initials.toUpperCase()];
+                mappedShifts.forEach(shiftString => {
+                    const td = document.createElement('td');
+                    td.innerText = shiftString;
+                    tr.appendChild(td);
+                });
+
+                outputBody.appendChild(tr);
+            });
+        }
+
+        // --- 6. EXPORT TO EXCEL ---
+        function exportToExcel() {
+            // Get the HTML table
+            const table = document.getElementById('final-output-table');
+            
+            // Convert to SheetJS workbook
+            const wb = XLSX.utils.table_to_book(table, {sheet: "Schedule Output"});
+            
+            // Generate today's date (YYYY-MM-DD format for valid filenames)
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const dd = String(today.getDate()).padStart(2, '0');
+            const formattedDate = `${yyyy}-${mm}-${dd}`;
+            
+            const filename = `priorpayperiod_${formattedDate}.xlsx`;
+            
+            // Trigger Download
+            XLSX.writeFile(wb, filename);
+        }
+
+        // --- 7. UTILS ---
+        function switchTab(tab) {
+            const tInput = document.getElementById('tab-input');
+            const tOutput = document.getElementById('tab-output');
+            const bInput = document.getElementById('tab-btn-input');
+            const bOutput = document.getElementById('tab-btn-output');
+
+            const activeClasses = ['bg-blue-600', 'text-white', 'shadow-sm'];
+            const inactiveClasses = ['text-slate-300', 'hover:text-white', 'hover:bg-slate-700'];
+
+            if (tab === 'input') {
+                tInput.classList.remove('hidden');
+                tOutput.classList.add('hidden');
+                bInput.classList.add(...activeClasses);
+                bInput.classList.remove(...inactiveClasses);
+                bOutput.classList.add(...inactiveClasses);
+                bOutput.classList.remove(...activeClasses);
+            } else {
+                tOutput.classList.remove('hidden');
+                tInput.classList.add('hidden');
+                bOutput.classList.add(...activeClasses);
+                bOutput.classList.remove(...inactiveClasses);
+                bInput.classList.add(...inactiveClasses);
+                bInput.classList.remove(...activeClasses);
+            }
+        }
+
+        // Boot up
+        window.onload = initGrid;
+
+    </script>
+</body>
+</html>
